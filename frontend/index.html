@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Go WebSockets Frontend</title>
+</head>
+<body class="center">
+    <h1>Go WebSockets Demo</h1>
+    <h3 id="cat-header">Currently in chat: General</h3>
+    <h3 id="connection-header">Connected to websocket: false</h3>
+    <form id="chatroom-selection">
+        <label for="chatroom">Select Chat Room:</label>
+        <input type="text" id="chatroom" name="chatroom"><br><br>
+        <input type="submit" value="Change chatroom">
+    </form>
+    
+    <br>
+    
+    <textarea class="messagearea" id="chatmessages" rows="10" cols="50" readonly placeholder="Welcome to chatroom"></textarea><br>
+    
+    <form id="chatroom-message">
+        <label for="message">Message:</label>
+        <input type="text" id="message" name="message" required><br><br>
+        <input type="submit" value="Send Message">
+    </form>
+
+    <div style="border: 3px solid black; margin-top: 30px;">
+        <form id="login-form">
+            <label for="Username">Username: </label>
+            <input type="text" id="Username" name="Username" required>
+            <label for="Password">Password: </label>
+            <input type="password" id="Password" name="Password" required placeholder="Password">
+            <br><br>
+            <input type="submit" value="Login">
+        </form>
+    </div>
+    
+    <script>
+        let selectedChat = "general";
+        let conn; // Declare conn in global scope
+        
+        class Event {
+            constructor(type, payload) {
+                this.type = type;
+                this.payload = payload;
+            }
+        }
+
+        function routeEvent(event) {
+            if(event.type == undefined) {
+                console.error("Event type is undefined");
+                return;
+            }
+
+            switch(event.type) {
+                case "join_room":
+                    console.log("Joining room:", event.payload.room);
+                    selectedChat = event.payload.room;
+                    document.getElementById("cat-header").textContent = `Currently in chat: ${selectedChat}`;
+                    break;
+                case "message":
+                    appendMessage(event.payload.message);
+                    break;
+                case "send_message":
+                    // Handle message confirmation from server
+                    appendMessage(`You: ${event.payload}`);
+                    break;
+                default:
+                    console.error("Unknown message type:", event.type);
+                    // Still try to display the payload if it's a string
+                    if (typeof event.payload === 'string') {
+                        appendMessage(`Unknown event: ${event.payload}`);
+                    }
+            }
+        }
+
+        function sendEvent(eventName, payload) {
+            if (conn && conn.readyState === WebSocket.OPEN) {
+                const event = new Event(eventName, payload);
+                conn.send(JSON.stringify(event));
+                console.log("Sent event:", event);
+            } else {
+                console.error("WebSocket is not connected");
+                appendMessage("Error: Not connected to server");
+            }
+        }
+        
+        function changeChatroom(event) {
+            event.preventDefault(); // Prevent form submission
+            const newChat = document.getElementById("chatroom");
+            if (newChat != null && newChat.value != selectedChat && newChat.value.trim() !== "") {
+                const newChatValue = newChat.value.trim();
+                console.log("Changing to chat room:", newChatValue);
+                
+                // Send room change message to server
+                sendEvent("join_room", { room: newChatValue });
+                
+                // Update local state
+                selectedChat = newChatValue;
+                document.getElementById("cat-header").textContent = `Currently in chat: ${selectedChat}`;
+            }
+            newChat.value = ""; // Clear the input
+            return false;
+        }
+        
+        function sendMessage(event) {
+            event.preventDefault(); // Prevent form submission
+            const messageInput = document.getElementById("message");
+            if (messageInput != null && messageInput.value.trim() !== "") {
+                const message = messageInput.value.trim();
+                sendEvent("send_message", message);
+                messageInput.value = ""; // Clear the input after sending
+            }
+            return false;
+        }
+        
+        function appendMessage(message) {
+            const chatMessages = document.getElementById("chatmessages");
+            const timestamp = new Date().toLocaleTimeString();
+            chatMessages.value += `[${timestamp}] ${message}\n`;
+            chatMessages.scrollTop = chatMessages.scrollHeight; // Auto-scroll to bottom
+        }
+
+        function login(event) {
+            event.preventDefault(); // Prevent form submission
+            const username = document.getElementById("Username").value;
+            const password = document.getElementById("Password").value;
+            
+            if (username && password) {
+                console.log("Attempting login with", username);
+                appendMessage("Attempting to login...");
+                
+                fetch("/login", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ username, password })
+                }).then((resp) => {
+                    if(resp.ok) {
+                        console.log("Login successful");
+                        appendMessage("Login successful, connecting to WebSocket...");
+                        return resp.json();
+                    } else {
+                        throw new Error(`Login failed with status: ${resp.status}`);
+                    }
+                }).then((data) => {
+                    console.log("Received OTP:", data.otp);
+                    connectWebSocket(data.otp);
+                }).catch((error) => {
+                    console.error("Error during login:", error);
+                    appendMessage(`Login failed: ${error.message}`);
+                    alert("Login failed: " + error.message);
+                });
+            } else {
+                alert("Please enter both username and password.");
+            }
+        }
+
+        function connectWebSocket(otp) {
+            if (window['WebSocket']) {
+                console.log("WebSocket is supported by your browser.");
+                const wsUrl = `ws://${document.location.host}/ws?otp=${otp}`;
+                console.log("Connecting to:", wsUrl);
+                
+                conn = new WebSocket(wsUrl);
+                
+                conn.onopen = function(event) {
+                    console.log("WebSocket connection opened");
+                    document.getElementById("connection-header").innerHTML = "Connected to websocket: true";
+                    appendMessage("Connected to WebSocket server!");
+                };
+                
+                conn.onmessage = function(event) {
+                    console.log("Received raw message:", event.data);
+                    try {
+                        // Try to parse as JSON first
+                        const eventData = JSON.parse(event.data);
+                        const eventObj = Object.assign(new Event(), eventData);
+                        routeEvent(eventObj);
+                    } catch (e) {
+                        // If not JSON, treat as plain text message
+                        console.log("Received plain text message:", event.data);
+                        appendMessage(`Server: ${event.data}`);
+                    }
+                };
+                
+                conn.onclose = function(event) {
+                    console.log("WebSocket connection closed", event.code, event.reason);
+                    document.getElementById("connection-header").innerHTML = "Connected to websocket: false";
+                    appendMessage(`WebSocket disconnected (Code: ${event.code})`);
+                };
+                
+                conn.onerror = function(error) {
+                    console.error("WebSocket error:", error);
+                    appendMessage("WebSocket connection error occurred");
+                };
+            } else {
+                alert("WebSocket is not supported by your browser.");
+            }
+        }
+        
+        window.onload = function() {
+            // Attach event listeners
+            document.getElementById("chatroom-selection").onsubmit = changeChatroom;
+            document.getElementById("chatroom-message").onsubmit = sendMessage;
+            document.getElementById("login-form").onsubmit = login;
+            
+            appendMessage("Welcome! Please login to start chatting.");
+        }
+    </script>
+    
+    <style>
+        body {
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background-color: rgb(65,56,56);
+            color: white;
+            padding: 0;
+            margin: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .center {
+            margin: auto;
+            width: 50%;
+            padding: 10px;
+            border: 3px solid #73AD21;
+        }
+        .messagearea {
+            width: 95%;
+            resize: vertical;
+            background-color: #2a2a2a;
+            color: white;
+            border: 1px solid #73AD21;
+            padding: 10px;
+        }
+        input[type="text"], input[type="password"] {
+            width: 200px;
+            padding: 5px;
+            margin: 5px;
+        }
+        input[type="submit"] {
+            padding: 5px 10px;
+            margin-left: 10px;
+            background-color: #73AD21;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        input[type="submit"]:hover {
+            background-color: #5a8c1a;
+        }
+        label {
+            color: white;
+        }
+        #connection-header {
+            color: #73AD21;
+        }
+    </style>
+</body>
+</html>
