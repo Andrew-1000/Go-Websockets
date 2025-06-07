@@ -6,60 +6,29 @@ import (
 	"time"
 )
 
+// Event is the Messages sent over the websocket
+// Used to differ between different actions
 type Event struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `jsobn:"payload"`
+	// Type is the message type sent
+	Type string `json:"type"`
+	// Payload is the data Based on the Type
+	Payload json.RawMessage `json:"payload"`
 }
 
 
 
 // EventHandler is a function signature that is used to affect messages on the socket and triggered
 // depending on the type
-
-
 type EventHandler func(event Event, c *Client) error
 
-
-
 const (
+	// EventSendMessage is the event name for new chat messages sent
 	EventSendMessage = "send_message"
 	// EventNewMessage is a response to send_message
 	EventNewMessage = "new_message"
 	// EventChangeRoom is event when switching rooms
 	EventChangeRoom = "change_room"
-
-	EventReceiveMessage = "receive_message"
-	EventCloseConnection = "close_connection"
-	EventError = "error"
-	EventClientConnected = "client_connected"
-	EventClientDisconnected = "client_disconnected"
-	EventClientList = "client_list"
-	EventClientListUpdate = "client_list_update"
-	EventClientMessage = "client_message"
-	EventServerMessage = "server_message"
-	EventServerError = "server_error"
-	EventServerStatus = "server_status"
-	EventServerStatusUpdate = "server_status_update"
-	EventServerConfig = "server_config"
-	EventServerConfigUpdate = "server_config_update"
-	EventServerCommand = "server_command"
-	EventServerCommandResponse = "server_command_response"
-	EventServerCommandError = "server_command_error"
-	EventServerCommandStatus = "server_command_status"
-	EventServerCommandStatusUpdate = "server_command_status_update"
-	EventServerCommandList = "server_command_list"
-	EventServerCommandListUpdate = "server_command_list_update"
-	EventServerCommandExecution = "server_command_execution"
-	EventServerCommandExecutionUpdate = "server_command_execution_update"
-	EventServerCommandExecutionError = "server_command_execution_error"
-	EventServerCommandExecutionStatus = "server_command_execution_status"
-	EventServerCommandExecutionStatusUpdate = "server_command_execution_status_update"
-	EventServerCommandExecutionList = "server_command_execution_list"
 )
-
-
-
-
 
 // SendMessageEvent is the payload sent in the
 // send_message event
@@ -101,13 +70,13 @@ func SendMessageHandler(event Event, c *Client) error {
 	outgoingEvent.Payload = data
 	outgoingEvent.Type = EventNewMessage
 	// Broadcast to all other Clients
-	// for client := range c.manager.clients {
-	// 	// Only send to clients inside the same chatroom
-	// 	// if client.chatroom == c.chatroom {
-	// 	// 	client.egress <- outgoingEvent
-	// 	// }
+	for client := range c.manager.clients {
+		// Only send to clients inside the same chatroom
+		if client.chatroom == c.chatroom {
+			client.egress <- outgoingEvent
+		}
 
-	// }
+	}
 	return nil
 }
 
@@ -116,15 +85,15 @@ type ChangeRoomEvent struct {
 }
 
 // ChatRoomHandler will handle switching of chatrooms between clients
-// func ChatRoomHandler(event Event, c *Client) error {
-// 	// Marshal Payload into wanted format
-// 	var changeRoomEvent ChangeRoomEvent
-// 	if err := json.Unmarshal(event.Payload, &changeRoomEvent); err != nil {
-// 		return fmt.Errorf("bad payload in request: %v", err)
-// 	}
+func ChatRoomHandler(event Event, c *Client) error {
+	// Marshal Payload into wanted format
+	var changeRoomEvent ChangeRoomEvent
+	if err := json.Unmarshal(event.Payload, &changeRoomEvent); err != nil {
+		return fmt.Errorf("bad payload in request: %v", err)
+	}
 
-// 	// Add Client to chat room
-// 	c.chatroom = changeRoomEvent.Name
+	// Add Client to chat room
+	c.chatroom = changeRoomEvent.Name
 
-// 	return nil
-// }
+	return nil
+}
